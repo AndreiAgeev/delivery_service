@@ -57,7 +57,8 @@ func main() {
 	defer consumer.Stop()
 
 	// Инициализация сервисов
-	orderService := services.NewOrderService(db, log)
+	geoService := services.NewGeolocationService(&cfg.Geolocation, redisClient, log)
+	orderService := services.NewOrderService(db, log, geoService, &cfg.Business)
 	courierService := services.NewCourierService(db, log)
 
 	// Инициализация handlers

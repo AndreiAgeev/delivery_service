@@ -158,7 +158,8 @@ func GenerateKey(prefix, id string) string {
 
 // Константы для префиксов ключей
 const (
-	KeyPrefixOrder   = "order"
-	KeyPrefixCourier = "courier"
-	KeyPrefixStats   = "stats"
+	KeyPrefixOrder            = "order"
+	KeyPrefixCourier          = "courier"
+	KeyPrefixStats            = "stats"
+	KeyPrefixOrderGeolocation = "order_geolocation"
 )

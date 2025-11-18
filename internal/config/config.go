@@ -8,11 +8,13 @@ import (
 
 // Config представляет конфигурацию приложения
 type Config struct {
-	Server   ServerConfig   `json:"server"`
-	Database DatabaseConfig `json:"database"`
-	Redis    RedisConfig    `json:"redis"`
-	Kafka    KafkaConfig    `json:"kafka"`
-	Logger   LoggerConfig   `json:"logger"`
+	Server      ServerConfig      `json:"server"`
+	Database    DatabaseConfig    `json:"database"`
+	Redis       RedisConfig       `json:"redis"`
+	Kafka       KafkaConfig       `json:"kafka"`
+	Logger      LoggerConfig      `json:"logger"`
+	Geolocation GeolocationConfig `json:"geolocation"`
+	Business    BusinessConfig    `json:"business"`
 }
 
 // ServerConfig представляет конфигурацию HTTP сервера
@@ -62,6 +64,17 @@ type LoggerConfig struct {
 	File   string `json:"file"`
 }
 
+// GeolocationConfig представляет конфигурацию для геосервиса (Openrouteservice)
+type GeolocationConfig struct {
+	OperouteAPIKey string `json:"openroute_api_key"`
+	YandexAPIKey   string `json:"yandex_api_key"`
+}
+
+// BusinessConfig включает в себя бизнес-показатели
+type BusinessConfig struct {
+	DeliveryRate int
+}
+
 // Load загружает конфигурацию из переменных окружения
 func Load() *Config {
 	return &Config{
@@ -98,6 +111,13 @@ func Load() *Config {
 			Level:  getEnv("LOG_LEVEL", "info"),
 			Format: getEnv("LOG_FORMAT", "json"),
 			File:   getEnv("LOG_FILE", ""),
+		},
+		Geolocation: GeolocationConfig{
+			OperouteAPIKey: getEnv("OPENROUTE_API_KEY", ""),
+			YandexAPIKey:   getEnv("YANDEX_API_KEY", ""),
+		},
+		Business: BusinessConfig{
+			DeliveryRate: getEnvAsInt("DELIVERY_RATE", 100),
 		},
 	}
 }

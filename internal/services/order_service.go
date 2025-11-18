@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"delivery-system/internal/config"
 	"delivery-system/internal/database"
 	"delivery-system/internal/logger"
 	"delivery-system/internal/models"
@@ -14,20 +15,50 @@ import (
 
 // OrderService представляет сервис для работы с заказами
 type OrderService struct {
-	db  *database.DB
-	log *logger.Logger
+	db       *database.DB
+	log      *logger.Logger
+	geo      *GeolocationService
+	business *config.BusinessConfig
 }
 
 // NewOrderService создает новый экземпляр сервиса заказов
-func NewOrderService(db *database.DB, log *logger.Logger) *OrderService {
+func NewOrderService(db *database.DB, log *logger.Logger, geo *GeolocationService, cfg *config.BusinessConfig) *OrderService {
 	return &OrderService{
-		db:  db,
-		log: log,
+		db:       db,
+		log:      log,
+		geo:      geo,
+		business: cfg,
 	}
 }
 
 // CreateOrder создает новый заказ
 func (s *OrderService) CreateOrder(req *models.CreateOrderRequest) (*models.Order, error) {
+	var coordinates [][2]float64
+
+	// Определяем коодинаты адреса получения
+	if err := s.getCoordinates(&coordinates, req.PickupAddress); err != nil {
+		s.log.WithError(err).Error("Failed to get pickup coordinates")
+		return nil, err
+	}
+
+	// Определяем коодинаты адреса доставки
+	if err := s.getCoordinates(&coordinates, req.DeliveryAddress); err != nil {
+		s.log.WithError(err).Error("Failed to get delivery coordinates")
+		return nil, err
+	}
+
+	// Рассчитываем длину маршрута
+	distance, err := s.makeRoute(&coordinates)
+	if err != nil {
+		s.log.WithError(err).Error("Error during delivery cost calculation")
+		return nil, fmt.Errorf("failed to calculate delivery cost. Error: %w", err)
+	}
+
+	// Если в запросе отсутствовал delivery_cost, то рассчитываем стоимость доставки
+	if req.DeliveryCost == nil {
+		req.DeliveryCost = s.calculateDeliveryCost(distance)
+	}
+
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin transaction: %w", err)
@@ -46,19 +77,22 @@ func (s *OrderService) CreateOrder(req *models.CreateOrderRequest) (*models.Orde
 		ID:              orderID,
 		CustomerName:    req.CustomerName,
 		CustomerPhone:   req.CustomerPhone,
+		PickupAddress:   req.PickupAddress,
 		DeliveryAddress: req.DeliveryAddress,
 		TotalAmount:     totalAmount,
+		DeliveryCost:    *req.DeliveryCost,
 		Status:          models.OrderStatusCreated,
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 	}
 
 	query := `
-		INSERT INTO orders (id, customer_name, customer_phone, delivery_address, total_amount, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO orders (id, customer_name, customer_phone, pickup_address,
+		            delivery_address, total_amount, delivery_cost, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
-	_, err = tx.Exec(query, order.ID, order.CustomerName, order.CustomerPhone,
-		order.DeliveryAddress, order.TotalAmount, order.Status, order.CreatedAt, order.UpdatedAt)
+	_, err = tx.Exec(query, order.ID, order.CustomerName, order.CustomerPhone, order.PickupAddress,
+		order.DeliveryAddress, order.TotalAmount, order.DeliveryCost, order.Status, order.CreatedAt, order.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create order: %w", err)
 	}
@@ -88,6 +122,9 @@ func (s *OrderService) CreateOrder(req *models.CreateOrderRequest) (*models.Orde
 		return nil, fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
+	// Кешируем геоданные заказа
+	s.geo.cacheResults(coordinates, distance, order)
+
 	s.log.WithFields(map[string]interface{}{
 		"order_id":      order.ID,
 		"customer_name": order.CustomerName,
@@ -102,8 +139,8 @@ func (s *OrderService) GetOrder(orderID uuid.UUID) (*models.Order, error) {
 	order := &models.Order{}
 
 	query := `
-		SELECT id, customer_name, customer_phone, delivery_address, total_amount, 
-		       status, courier_id, created_at, updated_at, delivered_at
+		SELECT id, customer_name, customer_phone, pickup_address,delivery_address, total_amount, 
+		       delivery_cost, status, courier_id, created_at, updated_at, delivered_at
 		FROM orders 
 		WHERE id = $1
 	`
@@ -189,8 +226,8 @@ func (s *OrderService) UpdateOrderStatus(orderID uuid.UUID, req *models.UpdateOr
 // GetOrders получает список заказов с фильтрацией
 func (s *OrderService) GetOrders(status *models.OrderStatus, courierID *uuid.UUID, limit, offset int) ([]*models.Order, error) {
 	query := `
-		SELECT id, customer_name, customer_phone, delivery_address, total_amount, 
-		       status, courier_id, created_at, updated_at, delivered_at
+		SELECT id, customer_name, customer_phone, pickup_address, delivery_address, total_amount, 
+		       delivery_cost, status, courier_id, created_at, updated_at, delivered_at
 		FROM orders 
 		WHERE 1=1
 	`
@@ -240,4 +277,28 @@ func (s *OrderService) GetOrders(status *models.OrderStatus, courierID *uuid.UUI
 	}
 
 	return orders, nil
+}
+
+func (s *OrderService) getCoordinates(coordinates *[][2]float64, address string) error {
+	lng, lat, err := s.geo.GetCoordinates(address)
+	if err != nil {
+		s.log.WithError(err).Error("Failed to get coordinates")
+		return err
+	}
+	*coordinates = append(*coordinates, [2]float64{lng, lat})
+	return nil
+}
+
+func (s *OrderService) makeRoute(coordinates *[][2]float64) (float64, error) {
+	dist, err := s.geo.MakeRoute(*coordinates)
+	if err != nil {
+		s.log.WithError(err).Error("Failed to make route")
+		return 0, err
+	}
+	return dist, nil
+}
+
+func (s *OrderService) calculateDeliveryCost(dist float64) *float64 {
+	deliveryCost := dist / float64(1000) * float64(s.business.DeliveryRate)
+	return &deliveryCost
 }
