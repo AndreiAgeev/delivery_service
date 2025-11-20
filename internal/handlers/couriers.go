@@ -19,15 +19,17 @@ import (
 // CourierHandler представляет обработчик курьеров
 type CourierHandler struct {
 	courierService *services.CourierService
+	reviewService  *services.ReviewService
 	producer       *kafka.Producer
 	redisClient    *redis.Client
 	log            *logger.Logger
 }
 
 // NewCourierHandler создает новый обработчик курьеров
-func NewCourierHandler(courierService *services.CourierService, producer *kafka.Producer, redisClient *redis.Client, log *logger.Logger) *CourierHandler {
+func NewCourierHandler(courierService *services.CourierService, reviewService *services.ReviewService, producer *kafka.Producer, redisClient *redis.Client, log *logger.Logger) *CourierHandler {
 	return &CourierHandler{
 		courierService: courierService,
+		reviewService:  reviewService,
 		producer:       producer,
 		redisClient:    redisClient,
 		log:            log,
@@ -179,6 +181,7 @@ func (h *CourierHandler) UpdateCourierStatus(w http.ResponseWriter, r *http.Requ
 }
 
 // GetCouriers получает список курьеров с фильтрацией
+// TODO: добавить фильтр по рейтингу (заданное количество и больше)
 func (h *CourierHandler) GetCouriers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -208,7 +211,14 @@ func (h *CourierHandler) GetCouriers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	couriers, err := h.courierService.GetCouriers(status, limit, offset)
+	var ratingSort bool
+	if ratingSortStr := query.Get("rating_sort"); ratingSortStr != "" {
+		if s, err := strconv.ParseBool(ratingSortStr); err == nil && s {
+			ratingSort = s
+		}
+	}
+
+	couriers, err := h.courierService.GetCouriers(status, limit, offset, ratingSort)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to get couriers")
 		writeErrorResponse(w, http.StatusInternalServerError, "Failed to get couriers")
@@ -288,6 +298,28 @@ func (h *CourierHandler) AssignOrderToCourier(w http.ResponseWriter, r *http.Req
 
 	h.log.WithField("order_id", req.OrderID).WithField("courier_id", courierID).Info("Order assigned to courier")
 	writeJSONResponse(w, http.StatusOK, map[string]string{"message": "Order assigned to courier successfully"})
+}
+
+func (h *CourierHandler) GetCourierReviews(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+	}
+
+	courierID, err := extractUUIDFromPath(r.URL.Path, apiCourierPrefix)
+	if err != nil {
+		writeErrorResponse(w, http.StatusBadRequest, "Invalid courier ID")
+		return
+	}
+
+	reviews, err := h.reviewService.GetReviews(courierID)
+	if err != nil {
+		h.log.WithError(err).Error("Failed to get reviews")
+		writeErrorResponse(w, http.StatusInternalServerError, "Failed to get reviews")
+		return
+	}
+
+	h.log.Info("Successfully retrieved courier reviews")
+	writeJSONResponse(w, http.StatusOK, reviews)
 }
 
 // validateCreateCourierRequest валидирует запрос на создание курьера

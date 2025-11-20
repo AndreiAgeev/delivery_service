@@ -162,4 +162,5 @@ const (
 	KeyPrefixCourier          = "courier"
 	KeyPrefixStats            = "stats"
 	KeyPrefixOrderGeolocation = "order_geolocation"
+	KeyPrefixReview           = "review"
 )

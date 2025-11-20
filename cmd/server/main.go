@@ -60,10 +60,11 @@ func main() {
 	geoService := services.NewGeolocationService(&cfg.Geolocation, redisClient, log)
 	orderService := services.NewOrderService(db, log, geoService, &cfg.Business)
 	courierService := services.NewCourierService(db, log)
+	reviewService := services.NewReviewService(db, log)
 
 	// Инициализация handlers
-	orderHandler := handlers.NewOrderHandler(orderService, producer, redisClient, log)
-	courierHandler := handlers.NewCourierHandler(courierService, producer, redisClient, log)
+	orderHandler := handlers.NewOrderHandler(orderService, reviewService, producer, redisClient, log)
+	courierHandler := handlers.NewCourierHandler(courierService, reviewService, producer, redisClient, log)
 	healthHandler := handlers.NewHealthHandler(db, redisClient)
 
 	// Регистрация обработчиков событий Kafka
@@ -156,6 +157,12 @@ func handleOrderRoute(handler *handlers.OrderHandler) http.HandlerFunc {
 			} else {
 				writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 			}
+		} else if strings.HasSuffix(r.URL.Path, "/review") {
+			if r.Method == http.MethodPost {
+				handler.CreateReview(w, r)
+			} else {
+				writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+			}
 		} else {
 			// Получение заказа по ID
 			if r.Method == http.MethodGet {
@@ -198,6 +205,13 @@ func handleCourierRoute(handler *handlers.CourierHandler) http.HandlerFunc {
 			} else {
 				writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 			}
+		} else if strings.HasSuffix(r.URL.Path, "/reviews") {
+			if r.Method == http.MethodGet {
+				handler.GetCourierReviews(w, r)
+			} else {
+				writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+			}
+
 		} else {
 			// Получение курьера по ID
 			if r.Method == http.MethodGet {
