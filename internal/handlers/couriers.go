@@ -181,7 +181,6 @@ func (h *CourierHandler) UpdateCourierStatus(w http.ResponseWriter, r *http.Requ
 }
 
 // GetCouriers получает список курьеров с фильтрацией
-// TODO: добавить фильтр по рейтингу (заданное количество и больше)
 func (h *CourierHandler) GetCouriers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")

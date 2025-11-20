@@ -118,7 +118,6 @@ func (s *CourierService) UpdateCourierStatus(courierID uuid.UUID, req *models.Up
 }
 
 // GetCouriers получает список курьеров с фильтрацией
-// TODO: добавить фильтр по rating
 func (s *CourierService) GetCouriers(status *models.CourierStatus, limit, offset int, ratingSort bool) ([]*models.Courier, error) {
 	query := `
 		SELECT id, name, phone, status, rating, total_reviews,
