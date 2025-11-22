@@ -248,6 +248,7 @@ func (h *OrderHandler) CreateReview(w http.ResponseWriter, r *http.Request) {
 	// Валидируем полученные данные
 	if err := h.validateCreateReviewRequest(&req); err != nil {
 		writeErrorResponse(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	// Получаем ID заказа

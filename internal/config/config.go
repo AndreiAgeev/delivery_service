@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/joho/godotenv"
 )
 
 // Config представляет конфигурацию приложения
@@ -77,6 +79,7 @@ type BusinessConfig struct {
 
 // Load загружает конфигурацию из переменных окружения
 func Load() *Config {
+	_ = godotenv.Load()
 	return &Config{
 		Server: ServerConfig{
 			Port:         getEnv("SERVER_PORT", "8080"),

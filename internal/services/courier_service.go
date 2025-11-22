@@ -75,6 +75,7 @@ func (s *CourierService) GetCourier(courierID uuid.UUID) (*models.Courier, error
 		&courier.LastSeenAt,
 	)
 	if err != nil {
+		s.log.WithError(err).Error("failed query")
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("courier not found")
 		}

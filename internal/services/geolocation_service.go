@@ -17,9 +17,7 @@ import (
 	"golang.org/x/net/context"
 )
 
-const (
-	defaultCacheTTL = 15 * time.Hour
-)
+const defaultCacheTTL = 15 * time.Minute
 
 /*
 GeolocationService - сервис для работы с геосервисами.
@@ -29,6 +27,7 @@ GeolocationService.openrouteKey - API-ключ для работы с OpenrouteS
 type GeolocationService struct {
 	openrouteKey string
 	yandexKey    string
+	httpClient   *http.Client
 	redisClient  *redis.Client
 	log          *logger.Logger
 }
@@ -38,6 +37,7 @@ func NewGeolocationService(cfg *config.GeolocationConfig, redisClient *redis.Cli
 	return &GeolocationService{
 		openrouteKey: cfg.OperouteAPIKey,
 		yandexKey:    cfg.YandexAPIKey,
+		httpClient:   &http.Client{},
 		redisClient:  redisClient,
 		log:          log,
 	}
@@ -45,18 +45,8 @@ func NewGeolocationService(cfg *config.GeolocationConfig, redisClient *redis.Cli
 
 // GetCoordinates возвращает координаты (lng, lat) указанного адреса
 func (g *GeolocationService) GetCoordinates(address string) (float64, float64, error) {
-	escapedAddress := url.QueryEscape(address)
-
-	requestURL := fmt.Sprintf(
-		"%s?api_key=%s&geocode=%s&results=%d&format=%s",
-		models.YandexGeocoderURL,
-		g.yandexKey,
-		escapedAddress,
-		1,
-		"json",
-	)
-
-	resp, err := http.Get(requestURL)
+	requestURL := g.buildYandexApiURL(address)
+	resp, err := g.httpClient.Get(requestURL)
 	if err != nil {
 		g.log.WithError(err).Error("Failed to get response from Yandex API")
 		return 0, 0, err
@@ -123,8 +113,7 @@ func (g *GeolocationService) MakeRoute(coordinates [][2]float64) (float64, error
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", g.openrouteKey)
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := g.httpClient.Do(req)
 	if err != nil {
 		g.log.WithError(err).Error("Failed to send request")
 		return 0, err
@@ -147,11 +136,12 @@ func (g *GeolocationService) MakeRoute(coordinates [][2]float64) (float64, error
 	}
 
 	var apiResponse models.OpenrouteResponse
-	if err := json.Unmarshal(data, &apiResponse); err != nil {
+	if err = json.Unmarshal(data, &apiResponse); err != nil {
 		g.log.WithError(err).Error("Failed to unmarshal Openroute API response")
+		return 0, err
 	}
 
-	dist := apiResponse.Routes.Summary.Distance
+	dist := apiResponse.Routes[0].Summary.Distance
 	return dist, nil
 }
 
@@ -166,4 +156,19 @@ func (g *GeolocationService) cacheResults(coordinates [][2]float64, distance flo
 	if err := g.redisClient.Set(context.Background(), cacheKey, orderGeolocation, defaultCacheTTL); err != nil {
 		g.log.WithError(err).Error("Failed to cache order")
 	}
+}
+
+func (g *GeolocationService) buildYandexApiURL(address string) string {
+	u, err := url.Parse(models.YandexGeocoderURL)
+	if err != nil {
+		g.log.WithError(err).Error("Failed to parse Yandex API URL")
+	}
+	queryParams := url.Values{}
+	queryParams.Add("apikey", g.yandexKey)
+	queryParams.Add("geocode", address)
+	queryParams.Add("results", "1")
+	queryParams.Add("format", "json")
+
+	u.RawQuery = queryParams.Encode()
+	return u.String()
 }

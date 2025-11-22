@@ -21,7 +21,7 @@ type Courier struct {
 	Name         string        `json:"name" db:"name"`
 	Phone        string        `json:"phone" db:"phone"`
 	Status       CourierStatus `json:"status" db:"status"`
-	Rating       float64       `json:"rating" db:"rating"`
+	Rating       *float64      `json:"rating,omitempty" db:"rating"`
 	TotalReviews int           `json:"total_reviews" db:"total_reviews"`
 	CurrentLat   *float64      `json:"current_lat,omitempty" db:"current_lat"`
 	CurrentLon   *float64      `json:"current_lon,omitempty" db:"current_lon"`

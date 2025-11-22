@@ -26,7 +26,7 @@ type OpenrouteRequest struct {
 }
 
 type OpenrouteResponse struct {
-	Routes struct {
+	Routes []struct {
 		Summary struct {
 			Distance float64 `json:"distance"`
 		} `json:"summary"`

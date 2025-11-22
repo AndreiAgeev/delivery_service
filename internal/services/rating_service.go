@@ -60,7 +60,7 @@ func (s *ReviewService) CreateReview(req *models.CreateReviewRequest, order *mod
 func (s *ReviewService) GetReviews(courierID uuid.UUID) ([]*models.Review, error) {
 	query := `
 		SELECT id, order_id, courier_id, rating, text
-		FROM couriers WHERE courier_id = $1
+		FROM reviews WHERE courier_id = $1
 	`
 	rows, err := s.db.Query(query, courierID)
 	if err != nil {

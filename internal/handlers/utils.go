@@ -14,7 +14,7 @@ import (
 const (
 	defaultCacheTTL         = 15 * time.Minute
 	apiOrderPrefix   string = "/api/orders/"
-	apiCourierPrefix string = "/api/courier/"
+	apiCourierPrefix string = "/api/couriers/"
 )
 
 // ErrorResponse представляет структуру ответа с ошибкой
