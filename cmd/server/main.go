@@ -42,6 +42,18 @@ func main() {
 	}
 	defer redisClient.Close()
 
+	// Cache-warming в горутинах
+	go func() {
+		if err := redisClient.CacheWarmingOrders(db); err != nil {
+			log.WithError(err).Fatal("Failed to warm cache with orders")
+		}
+	}()
+	go func() {
+		if err := redisClient.CacheWarmingCouriers(db); err != nil {
+			log.WithError(err).Fatal("Failed to warm cache with couriers")
+		}
+	}()
+
 	// Создание Kafka producer
 	producer, err := kafka.NewProducer(&cfg.Kafka, log)
 	if err != nil {
@@ -61,11 +73,13 @@ func main() {
 	orderService := services.NewOrderService(db, log, geoService, &cfg.Business)
 	courierService := services.NewCourierService(db, log)
 	reviewService := services.NewReviewService(db, log)
+	redisService := services.NewRedisService(redisClient, log)
 
 	// Инициализация handlers
 	orderHandler := handlers.NewOrderHandler(orderService, reviewService, producer, redisClient, log)
 	courierHandler := handlers.NewCourierHandler(courierService, reviewService, producer, redisClient, log)
 	healthHandler := handlers.NewHealthHandler(db, redisClient)
+	cacheHandler := handlers.NewCacheHandler(redisService, log)
 
 	// Регистрация обработчиков событий Kafka
 	registerEventHandlers(consumer, log)
@@ -76,7 +90,7 @@ func main() {
 	}
 
 	// Настройка HTTP роутера
-	mux := setupRoutes(orderHandler, courierHandler, healthHandler)
+	mux := setupRoutes(orderHandler, courierHandler, healthHandler, cacheHandler)
 
 	// Создание HTTP сервера
 	server := &http.Server{
@@ -113,7 +127,7 @@ func main() {
 }
 
 // setupRoutes настраивает маршруты HTTP сервера
-func setupRoutes(orderHandler *handlers.OrderHandler, courierHandler *handlers.CourierHandler, healthHandler *handlers.HealthHandler) *http.ServeMux {
+func setupRoutes(orderHandler *handlers.OrderHandler, courierHandler *handlers.CourierHandler, healthHandler *handlers.HealthHandler, cacheHandler *handlers.CacheHandler) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// Health check endpoints
@@ -129,6 +143,9 @@ func setupRoutes(orderHandler *handlers.OrderHandler, courierHandler *handlers.C
 	mux.HandleFunc("/api/couriers", corsMiddleware(handleCouriersRoute(courierHandler)))
 	mux.HandleFunc("/api/couriers/", corsMiddleware(handleCourierRoute(courierHandler)))
 	mux.HandleFunc("/api/couriers/available", corsMiddleware(courierHandler.GetAvailableCouriers))
+
+	// Cache statistics endponts
+	mux.HandleFunc("/api/cache/metrics", corsMiddleware(cacheHandler.GetStatistics))
 
 	return mux
 }

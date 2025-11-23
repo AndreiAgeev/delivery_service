@@ -21,7 +21,7 @@ type CourierHandler struct {
 	courierService *services.CourierService
 	reviewService  *services.ReviewService
 	producer       *kafka.Producer
-	redisClient    *redis.Client
+	redisClient    RedisInterface
 	log            *logger.Logger
 }
 
@@ -299,6 +299,7 @@ func (h *CourierHandler) AssignOrderToCourier(w http.ResponseWriter, r *http.Req
 	writeJSONResponse(w, http.StatusOK, map[string]string{"message": "Order assigned to courier successfully"})
 }
 
+// GetCourierReviews возвращает список отзывов на курьера
 func (h *CourierHandler) GetCourierReviews(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
