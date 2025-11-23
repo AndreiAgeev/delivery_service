@@ -18,19 +18,21 @@ import (
 
 // OrderHandler представляет обработчик заказов
 type OrderHandler struct {
-	orderService *services.OrderService
-	producer     *kafka.Producer
-	redisClient  *redis.Client
-	log          *logger.Logger
+	orderService  *services.OrderService
+	reviewService *services.ReviewService
+	producer      *kafka.Producer
+	redisClient   *redis.Client
+	log           *logger.Logger
 }
 
 // NewOrderHandler создает новый обработчик заказов
-func NewOrderHandler(orderService *services.OrderService, producer *kafka.Producer, redisClient *redis.Client, log *logger.Logger) *OrderHandler {
+func NewOrderHandler(orderService *services.OrderService, reviewService *services.ReviewService, producer *kafka.Producer, redisClient *redis.Client, log *logger.Logger) *OrderHandler {
 	return &OrderHandler{
-		orderService: orderService,
-		producer:     producer,
-		redisClient:  redisClient,
-		log:          log,
+		orderService:  orderService,
+		reviewService: reviewService,
+		producer:      producer,
+		redisClient:   redisClient,
+		log:           log,
 	}
 }
 
@@ -85,7 +87,7 @@ func (h *OrderHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orderID, err := extractUUIDFromPath(r.URL.Path, "/api/orders/")
+	orderID, err := extractUUIDFromPath(r.URL.Path, apiOrderPrefix)
 	if err != nil {
 		writeErrorResponse(w, http.StatusBadRequest, "Invalid order ID")
 		return
@@ -228,6 +230,80 @@ func (h *OrderHandler) GetOrders(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, http.StatusOK, orders)
 }
 
+// CreateReview создаёт отзыв
+func (h *OrderHandler) CreateReview(w http.ResponseWriter, r *http.Request) {
+	// Проверяем метода запроса
+	if r.Method != http.MethodPost {
+		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Получаем объект запроса
+	var req models.CreateReviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// Валидируем полученные данные
+	if err := h.validateCreateReviewRequest(&req); err != nil {
+		writeErrorResponse(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// Получаем ID заказа
+	orderID, err := extractUUIDFromPath(r.URL.Path, apiOrderPrefix)
+	if err != nil {
+		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Попытка получить заказ из кеша. Если не вышло - получаем из БД
+	orderCacheKey := redis.GenerateKey(redis.KeyPrefixOrder, orderID.String())
+	var order models.Order
+	if err := h.redisClient.Get(r.Context(), orderCacheKey, &order); err == nil {
+		h.log.WithField("order_id", orderID).Debug("Order retrieved from cache")
+	} else {
+		orderPtr, err := h.orderService.GetOrder(orderID)
+		if err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				writeErrorResponse(w, http.StatusNotFound, "Order not found")
+			} else {
+				h.log.WithError(err).Error("Failed to get order")
+				writeErrorResponse(w, http.StatusInternalServerError, "Failed to get order")
+			}
+			return
+		}
+		order = *orderPtr
+	}
+
+	// Создаём отзыв
+	review, err := h.reviewService.CreateReview(&req, &order)
+	if err != nil {
+		h.log.WithError(err).Error("Failed to create review")
+		writeErrorResponse(w, http.StatusInternalServerError, "Failed to create review")
+	}
+
+	if err := h.reviewService.RecalculateRating(review.CourierID); err != nil {
+		h.log.WithError(err).Error("Error happened during courier rating update: %w", err)
+	}
+
+	// Кеширование отзыва в Redis
+	cacheKey := redis.GenerateKey(redis.KeyPrefixReview, review.ID.String())
+	if err := h.redisClient.Set(r.Context(), cacheKey, review, defaultCacheTTL); err != nil {
+		h.log.WithError(err).Error("Failed to cache review")
+	}
+
+	h.log.WithFields(map[string]interface{}{
+		"id":         review.ID,
+		"order_id":   order.ID,
+		"courier_id": order.CourierID,
+		"rating":     review.Rating,
+		"text":       review.Text,
+	}).Info("Review created")
+	writeJSONResponse(w, http.StatusOK, review)
+}
+
 // validateCreateOrderRequest валидирует запрос на создание заказа
 func (h *OrderHandler) validateCreateOrderRequest(req *models.CreateOrderRequest) error {
 	if req.CustomerName == "" {
@@ -255,5 +331,16 @@ func (h *OrderHandler) validateCreateOrderRequest(req *models.CreateOrderRequest
 		}
 	}
 
+	return nil
+}
+
+// validateCreateReviewRequest валидирует запрос создания отзыва
+func (h *OrderHandler) validateCreateReviewRequest(req *models.CreateReviewRequest) error {
+	if req.Rating < 1 || req.Rating > 5 {
+		return fmt.Errorf("rating value must be between 1 and 5")
+	}
+	if len(req.Text) > 255 {
+		return fmt.Errorf("review text must be no longer than 255 characters")
+	}
 	return nil
 }

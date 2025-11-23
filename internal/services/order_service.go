@@ -146,8 +146,8 @@ func (s *OrderService) GetOrder(orderID uuid.UUID) (*models.Order, error) {
 	`
 
 	err := s.db.QueryRow(query, orderID).Scan(
-		&order.ID, &order.CustomerName, &order.CustomerPhone, &order.DeliveryAddress,
-		&order.TotalAmount, &order.Status, &order.CourierID, &order.CreatedAt,
+		&order.ID, &order.CustomerName, &order.CustomerPhone, &order.PickupAddress, &order.DeliveryAddress,
+		&order.TotalAmount, &order.DeliveryCost, &order.Status, &order.CourierID, &order.CreatedAt,
 		&order.UpdatedAt, &order.DeliveredAt,
 	)
 	if err != nil {

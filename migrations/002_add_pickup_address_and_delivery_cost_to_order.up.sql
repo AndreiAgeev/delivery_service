@@ -1,5 +1,3 @@
 ALTER TABLE orders
-ADD (
-    pickup_address TEXT NOT NULL,
-    delivery_cost DECIMAL(10, 2) NOT NULL
-);
+ADD COLUMN pickup_address TEXT NOT NULL,
+ADD COLUMN delivery_cost DECIMAL(10, 2) NOT NULL;
