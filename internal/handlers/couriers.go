@@ -90,10 +90,12 @@ func (h *CourierHandler) GetCourier(w http.ResponseWriter, r *http.Request) {
 	cacheKey := redis.GenerateKey(redis.KeyPrefixCourier, courierID.String())
 	var courier models.Courier
 	if err := h.redisClient.Get(r.Context(), cacheKey, &courier); err == nil {
+		h.redisClient.Hit()
 		h.log.WithField("courier_id", courierID).Debug("Courier retrieved from cache")
 		writeJSONResponse(w, http.StatusOK, &courier)
 		return
 	}
+	h.redisClient.Miss()
 
 	// Получение из базы данных
 	courierPtr, err := h.courierService.GetCourier(courierID)
@@ -109,8 +111,10 @@ func (h *CourierHandler) GetCourier(w http.ResponseWriter, r *http.Request) {
 
 	// Кеширование курьера
 	if err := h.redisClient.Set(r.Context(), cacheKey, courierPtr, defaultCacheTTL); err != nil {
+		h.redisClient.Miss()
 		h.log.WithError(err).Error("Failed to cache courier")
 	}
+	h.redisClient.Hit()
 
 	writeJSONResponse(w, http.StatusOK, courierPtr)
 }
@@ -292,8 +296,13 @@ func (h *CourierHandler) AssignOrderToCourier(w http.ResponseWriter, r *http.Req
 	courierCacheKey := redis.GenerateKey(redis.KeyPrefixCourier, courierID.String())
 	orderCacheKey := redis.GenerateKey(redis.KeyPrefixOrder, req.OrderID.String())
 
-	h.redisClient.Delete(r.Context(), courierCacheKey)
-	h.redisClient.Delete(r.Context(), orderCacheKey)
+	if err = h.redisClient.Delete(r.Context(), courierCacheKey); err != nil {
+		h.log.WithError(err).Error("Failed to invalidate courier cache")
+	}
+
+	if err = h.redisClient.Delete(r.Context(), orderCacheKey); err != nil {
+		h.log.WithError(err).Error("Failed to invalidate order to courier")
+	}
 
 	h.log.WithField("order_id", req.OrderID).WithField("courier_id", courierID).Info("Order assigned to courier")
 	writeJSONResponse(w, http.StatusOK, map[string]string{"message": "Order assigned to courier successfully"})
@@ -301,16 +310,19 @@ func (h *CourierHandler) AssignOrderToCourier(w http.ResponseWriter, r *http.Req
 
 // GetCourierReviews возвращает список отзывов на курьера
 func (h *CourierHandler) GetCourierReviews(w http.ResponseWriter, r *http.Request) {
+	// Проверяем метод
 	if r.Method != http.MethodGet {
 		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
 
+	// Получаем id курьера
 	courierID, err := extractUUIDFromPath(r.URL.Path, apiCourierPrefix)
 	if err != nil {
 		writeErrorResponse(w, http.StatusBadRequest, "Invalid courier ID")
 		return
 	}
 
+	// Получаем список отзывов на курьера из БД
 	reviews, err := h.reviewService.GetReviews(courierID)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to get reviews")

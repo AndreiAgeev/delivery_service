@@ -97,10 +97,12 @@ func (h *OrderHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 	cacheKey := redis.GenerateKey(redis.KeyPrefixOrder, orderID.String())
 	var order models.Order
 	if err := h.redisClient.Get(r.Context(), cacheKey, &order); err == nil {
+		h.redisClient.Hit()
 		h.log.WithField("order_id", orderID).Debug("Order retrieved from cache")
 		writeJSONResponse(w, http.StatusOK, &order)
 		return
 	}
+	h.redisClient.Miss()
 
 	// Получение из базы данных
 	orderPtr, err := h.orderService.GetOrder(orderID)
@@ -116,8 +118,10 @@ func (h *OrderHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 
 	// Кеширование заказа
 	if err := h.redisClient.Set(r.Context(), cacheKey, orderPtr, defaultCacheTTL); err != nil {
+		h.redisClient.Miss()
 		h.log.WithError(err).Error("Failed to cache order")
 	}
+	h.redisClient.Hit()
 
 	writeJSONResponse(w, http.StatusOK, orderPtr)
 }
@@ -284,6 +288,7 @@ func (h *OrderHandler) CreateReview(w http.ResponseWriter, r *http.Request) {
 		writeErrorResponse(w, http.StatusInternalServerError, "Failed to create review")
 	}
 
+	// Пересчитывает рейтинг курьера
 	if err := h.reviewService.RecalculateRating(review.CourierID); err != nil {
 		h.log.WithError(err).Error("Error happened during courier rating update: %w", err)
 	}
