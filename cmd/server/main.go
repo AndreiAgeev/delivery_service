@@ -61,8 +61,15 @@ func main() {
 	}
 	defer producer.Close()
 
+	// Создание DLQ producer
+	dlqProducer, err := kafka.NewDLQProducer(&cfg.Kafka, log)
+	if err != nil {
+		log.WithError(err).Fatal("Failed to create Kafka DLQ producer")
+	}
+	defer producer.Close()
+
 	// Создание Kafka consumer
-	consumer, err := kafka.NewConsumer(&cfg.Kafka, log)
+	consumer, err := kafka.NewConsumer(&cfg.Kafka, log, dlqProducer)
 	if err != nil {
 		log.WithError(err).Fatal("Failed to create Kafka consumer")
 	}
@@ -83,6 +90,7 @@ func main() {
 
 	// Регистрация обработчиков событий Kafka
 	registerEventHandlers(consumer, log)
+	// TODO: добавить хендлеры (пусть даже ничего не обрабатывают)
 
 	// Запуск Kafka consumer
 	if err := consumer.Start(); err != nil {

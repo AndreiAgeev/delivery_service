@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"delivery-system/internal/config"
 	"delivery-system/internal/logger"
@@ -18,17 +19,19 @@ type EventHandler func(ctx context.Context, event *models.Event) error
 
 // Consumer представляет Kafka consumer
 type Consumer struct {
-	consumer sarama.ConsumerGroup
-	log      *logger.Logger
-	handlers map[models.EventType]EventHandler
-	topics   []string
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	consumer    sarama.ConsumerGroup
+	log         *logger.Logger
+	handlers    map[models.EventType]EventHandler
+	topics      []string
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
+	maxRetries  int
+	dlqProducer *DLQProducer
 }
 
 // NewConsumer создает новый Kafka consumer
-func NewConsumer(cfg *config.KafkaConfig, log *logger.Logger) (*Consumer, error) {
+func NewConsumer(cfg *config.KafkaConfig, log *logger.Logger, dlqProducer *DLQProducer) (*Consumer, error) {
 	config := sarama.NewConfig()
 	config.Consumer.Group.Rebalance.Strategy = sarama.BalanceStrategyRoundRobin
 	config.Consumer.Offsets.Initial = sarama.OffsetOldest
@@ -47,12 +50,14 @@ func NewConsumer(cfg *config.KafkaConfig, log *logger.Logger) (*Consumer, error)
 	log.Info("Kafka consumer created successfully")
 
 	return &Consumer{
-		consumer: consumer,
-		log:      log,
-		handlers: make(map[models.EventType]EventHandler),
-		topics:   topics,
-		ctx:      ctx,
-		cancel:   cancel,
+		consumer:    consumer,
+		log:         log,
+		handlers:    make(map[models.EventType]EventHandler),
+		topics:      topics,
+		ctx:         ctx,
+		cancel:      cancel,
+		maxRetries:  3,
+		dlqProducer: dlqProducer,
 	}, nil
 }
 
@@ -109,15 +114,28 @@ func (c *Consumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim saram
 				return nil
 			}
 
-			if err := c.processMessage(message); err != nil {
-				c.log.WithError(err).
-					WithField("topic", message.Topic).
-					WithField("partition", message.Partition).
-					WithField("offset", message.Offset).
-					Error("Failed to process message")
-			} else {
-				session.MarkMessage(message, "")
+			// Получаем correlationID
+			correlationID := getCorrelationID(message)
+
+			// Обрабатываем сообщение, определяем время обработки duration
+			start := time.Now() // отслеживаем время обработки события в секундах
+			err := c.processMessageWithRetries(message, correlationID)
+			duration := time.Since(start).Seconds()
+
+			// Проверяем успешность обработки и, при необходимости, отправляем сообщение в DLQ
+			if err != nil {
+				c.log.WithFields(map[string]interface{}{
+					"correlation_id": correlationID,
+					"error":          err,
+					"topic":          message.Topic,
+					"partition":      message.Partition,
+					"offset":         message.Offset,
+				}).Error("Failed to process message")
+				if dlqErr := c.dlqProducer.PublishFailedEvent(message, err.Error(), correlationID); dlqErr != nil {
+					return dlqErr
+				}
 			}
+			session.MarkMessage(message, "")
 
 		case <-session.Context().Done():
 			return nil
@@ -126,32 +144,41 @@ func (c *Consumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim saram
 }
 
 // processMessage обрабатывает полученное сообщение
-func (c *Consumer) processMessage(message *sarama.ConsumerMessage) error {
+func (c *Consumer) processMessageWithRetries(message *sarama.ConsumerMessage, correlationID string) error {
 	var event models.Event
 	if err := json.Unmarshal(message.Value, &event); err != nil {
 		return fmt.Errorf("failed to unmarshal event: %w", err)
 	}
 
-	c.log.WithField("event_type", event.Type).
-		WithField("event_id", event.ID).
-		WithField("topic", message.Topic).
-		Debug("Processing event")
+	c.log.WithFields(map[string]interface{}{
+		"correlation_id": correlationID,
+		"event_type":     event.Type,
+		"event_id":       event.ID,
+		"topic":          message.Topic,
+	}).Debug("Processing event...")
 
 	// Находим обработчик для данного типа события
 	handler, exists := c.handlers[event.Type]
 	if !exists {
-		c.log.WithField("event_type", event.Type).Warn("No handler registered for event type")
-		return nil // Не возвращаем ошибку, просто пропускаем событие
+		c.log.WithFields(map[string]interface{}{
+			"correlation_id": correlationID,
+			"event_type":     event.Type,
+		}).Warn("No handler registered for event type")
+		return fmt.Errorf("no handler registered for event type %s", event.Type)
 	}
 
-	// Вызываем обработчик
-	if err := handler(c.ctx, &event); err != nil {
-		return fmt.Errorf("handler failed for event type %s: %w", event.Type, err)
+	// Обрабатываем сообщение c.maxRetries раз
+	for i := 1; i <= c.maxRetries; i++ {
+		if err := handler(c.ctx, &event); err == nil {
+			c.log.WithField("event_id", event.ID.String()).Info("Message was successfully processed")
+			return nil
+		}
+		c.log.WithFields(map[string]interface{}{
+			"correlation_id": correlationID,
+			"event_id":       event.ID.String(),
+			"attempt":        i,
+		}).Warn("Failed to process message")
 	}
-
-	c.log.WithField("event_type", event.Type).
-		WithField("event_id", event.ID).
-		Debug("Event processed successfully")
 
 	return nil
 }

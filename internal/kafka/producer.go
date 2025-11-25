@@ -140,33 +140,35 @@ func (p *Producer) publishEvent(topic string, event models.Event) error {
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
+	correlationID := uuid.New().String()
+
 	message := &sarama.ProducerMessage{
 		Topic: topic,
 		Key:   sarama.StringEncoder(event.ID.String()),
 		Value: sarama.ByteEncoder(data),
 		Headers: []sarama.RecordHeader{
-			{
-				Key:   []byte("event_type"),
-				Value: []byte(event.Type),
-			},
-			{
-				Key:   []byte("timestamp"),
-				Value: []byte(event.Timestamp.Format(time.RFC3339)),
-			},
+			{Key: []byte("event_type"), Value: []byte(event.Type)},
+			{Key: []byte("timestamp"), Value: []byte(event.Timestamp.Format(time.RFC3339))},
+			{Key: []byte("correlation_id"), Value: []byte(correlationID)},
 		},
 	}
 
 	partition, offset, err := p.producer.SendMessage(message)
 	if err != nil {
+		p.log.WithFields(map[string]interface{}{
+			"correlation_id": correlationID,
+			"error":          err,
+		}).Error("failed to send message to topic")
 		return fmt.Errorf("failed to send message to topic %s: %w", topic, err)
 	}
-
-	p.log.WithField("topic", topic).
-		WithField("partition", partition).
-		WithField("offset", offset).
-		WithField("event_type", event.Type).
-		WithField("event_id", event.ID).
-		Debug("Event published successfully")
+	p.log.WithFields(map[string]interface{}{
+		"correlation_id": correlationID,
+		"topic":          topic,
+		"partition":      partition,
+		"offset":         offset,
+		"event_type":     event.Type,
+		"event_id":       event.ID,
+	}).Debug("Event published successfully")
 
 	return nil
 }
