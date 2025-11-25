@@ -269,8 +269,8 @@ func (s *OrderService) GetOrders(status *models.OrderStatus, courierID *uuid.UUI
 	for rows.Next() {
 		order := &models.Order{}
 		if err := rows.Scan(&order.ID, &order.CustomerName, &order.CustomerPhone,
-			&order.DeliveryAddress, &order.TotalAmount, &order.Status,
-			&order.CourierID, &order.CreatedAt, &order.UpdatedAt, &order.DeliveredAt); err != nil {
+			&order.PickupAddress, &order.DeliveryAddress, &order.TotalAmount, &order.DeliveryCost,
+			&order.Status, &order.CourierID, &order.CreatedAt, &order.UpdatedAt, &order.DeliveredAt); err != nil {
 			return nil, fmt.Errorf("failed to scan order: %w", err)
 		}
 		orders = append(orders, order)

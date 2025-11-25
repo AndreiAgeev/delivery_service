@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,10 +13,19 @@ import (
 
 // Константы
 const (
-	defaultCacheTTL         = 15 * time.Minute
+	defaultCacheTTL         = 5 * time.Minute
 	apiOrderPrefix   string = "/api/orders/"
 	apiCourierPrefix string = "/api/couriers/"
 )
+
+// RedisInterface - интерфейс, реализующий часть методов redis.Client, необходимых для хендлеров
+type RedisInterface interface {
+	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
+	Get(ctx context.Context, key string, dest interface{}) error
+	Delete(ctx context.Context, key string) error
+	Hit()
+	Miss()
+}
 
 // ErrorResponse представляет структуру ответа с ошибкой
 type ErrorResponse struct {
