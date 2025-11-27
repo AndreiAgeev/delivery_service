@@ -28,10 +28,11 @@ type Consumer struct {
 	wg          sync.WaitGroup
 	maxRetries  int
 	dlqProducer *DLQProducer
+	metrics     *KafkaMetrics
 }
 
 // NewConsumer создает новый Kafka consumer
-func NewConsumer(cfg *config.KafkaConfig, log *logger.Logger, dlqProducer *DLQProducer) (*Consumer, error) {
+func NewConsumer(cfg *config.KafkaConfig, log *logger.Logger, dlqProducer *DLQProducer, metrics *KafkaMetrics) (*Consumer, error) {
 	config := sarama.NewConfig()
 	config.Consumer.Group.Rebalance.Strategy = sarama.BalanceStrategyRoundRobin
 	config.Consumer.Offsets.Initial = sarama.OffsetOldest
@@ -58,6 +59,7 @@ func NewConsumer(cfg *config.KafkaConfig, log *logger.Logger, dlqProducer *DLQPr
 		cancel:      cancel,
 		maxRetries:  3,
 		dlqProducer: dlqProducer,
+		metrics:     metrics,
 	}, nil
 }
 
@@ -120,7 +122,14 @@ func (c *Consumer) ConsumeClaim(session sarama.ConsumerGroupSession, claim saram
 			// Обрабатываем сообщение, определяем время обработки duration
 			start := time.Now() // отслеживаем время обработки события в секундах
 			err := c.processMessageWithRetries(message, correlationID)
-			duration := time.Since(start).Seconds()
+			duration := time.Since(start).Milliseconds()
+
+			// Обновляем метрики
+			if err != nil {
+				go func() { c.metrics.RecordEvent(message.Topic, duration, false) }()
+			} else {
+				go func() { c.metrics.RecordEvent(message.Topic, duration, true) }()
+			}
 
 			// Проверяем успешность обработки и, при необходимости, отправляем сообщение в DLQ
 			if err != nil {

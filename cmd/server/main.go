@@ -54,6 +54,9 @@ func main() {
 		}
 	}()
 
+	// Создаём объект метрик Kafka
+	kafkaMetrics := kafka.NewKafkaMetrics()
+
 	// Создание Kafka producer
 	producer, err := kafka.NewProducer(&cfg.Kafka, log)
 	if err != nil {
@@ -69,11 +72,19 @@ func main() {
 	defer producer.Close()
 
 	// Создание Kafka consumer
-	consumer, err := kafka.NewConsumer(&cfg.Kafka, log, dlqProducer)
+	consumer, err := kafka.NewConsumer(&cfg.Kafka, log, dlqProducer, kafkaMetrics)
 	if err != nil {
 		log.WithError(err).Fatal("Failed to create Kafka consumer")
 	}
 	defer consumer.Stop()
+
+	// Создаём Lag Monitor и запускаем его
+	lagMonitor, err := kafka.NewLagMonitor(&cfg.Kafka, log)
+	if err != nil {
+		log.WithError(err).Fatal("Failed to create Kafka lag monitor")
+	}
+	lagMonitor.Start(kafkaMetrics)
+	defer lagMonitor.Stop()
 
 	// Инициализация сервисов
 	geoService := services.NewGeolocationService(&cfg.Geolocation, redisClient, log)
@@ -81,16 +92,17 @@ func main() {
 	courierService := services.NewCourierService(db, log)
 	reviewService := services.NewReviewService(db, log)
 	redisService := services.NewRedisService(redisClient, log)
+	kafkeMetricsService := services.NewKafkaMetricsService(kafkaMetrics)
 
 	// Инициализация handlers
 	orderHandler := handlers.NewOrderHandler(orderService, reviewService, producer, redisClient, log)
 	courierHandler := handlers.NewCourierHandler(courierService, reviewService, producer, redisClient, log)
 	healthHandler := handlers.NewHealthHandler(db, redisClient)
 	cacheHandler := handlers.NewCacheHandler(redisService, log)
+	kafkaMetricsHandler := handlers.NewKafkaMetricsHandler(kafkeMetricsService, log)
 
 	// Регистрация обработчиков событий Kafka
 	registerEventHandlers(consumer, log)
-	// TODO: добавить хендлеры (пусть даже ничего не обрабатывают)
 
 	// Запуск Kafka consumer
 	if err := consumer.Start(); err != nil {
@@ -98,7 +110,7 @@ func main() {
 	}
 
 	// Настройка HTTP роутера
-	mux := setupRoutes(orderHandler, courierHandler, healthHandler, cacheHandler)
+	mux := setupRoutes(orderHandler, courierHandler, healthHandler, cacheHandler, kafkaMetricsHandler)
 
 	// Создание HTTP сервера
 	server := &http.Server{
@@ -135,7 +147,13 @@ func main() {
 }
 
 // setupRoutes настраивает маршруты HTTP сервера
-func setupRoutes(orderHandler *handlers.OrderHandler, courierHandler *handlers.CourierHandler, healthHandler *handlers.HealthHandler, cacheHandler *handlers.CacheHandler) *http.ServeMux {
+func setupRoutes(
+	orderHandler *handlers.OrderHandler,
+	courierHandler *handlers.CourierHandler,
+	healthHandler *handlers.HealthHandler,
+	cacheHandler *handlers.CacheHandler,
+	kafkaMetricsHandler *handlers.KafkaMetricsHandler,
+) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	// Health check endpoints
@@ -152,8 +170,11 @@ func setupRoutes(orderHandler *handlers.OrderHandler, courierHandler *handlers.C
 	mux.HandleFunc("/api/couriers/", corsMiddleware(handleCourierRoute(courierHandler)))
 	mux.HandleFunc("/api/couriers/available", corsMiddleware(courierHandler.GetAvailableCouriers))
 
-	// Cache statistics endponts
+	// Cache statistics endpont
 	mux.HandleFunc("/api/cache/metrics", corsMiddleware(cacheHandler.GetStatistics))
+
+	// Kafka metrics endpoint
+	mux.HandleFunc("/api/kafka/stats", corsMiddleware(kafkaMetricsHandler.GetStatistics))
 
 	return mux
 }
@@ -251,15 +272,30 @@ func handleCourierRoute(handler *handlers.CourierHandler) http.HandlerFunc {
 // registerEventHandlers регистрирует обработчики событий Kafka
 func registerEventHandlers(consumer *kafka.Consumer, log *logger.Logger) {
 	// Пример обработчика событий - можно расширить по необходимости
-	consumer.RegisterHandler("order.created", func(ctx context.Context, event *models.Event) error {
+	consumer.RegisterHandler(models.EventTypeOrderCreated, func(ctx context.Context, event *models.Event) error {
 		log.WithField("event_id", event.ID).Info("Processing order created event")
 		// Здесь можно добавить дополнительную логику обработки
 		return nil
 	})
 
-	consumer.RegisterHandler("order.status_changed", func(ctx context.Context, event *models.Event) error {
+	consumer.RegisterHandler(models.EventTypeOrderStatusChanged, func(ctx context.Context, event *models.Event) error {
 		log.WithField("event_id", event.ID).Info("Processing order status changed event")
 		// Здесь можно добавить логику уведомлений, обновления статистики и т.д.
+		return nil
+	})
+
+	consumer.RegisterHandler(models.EventTypeCourierAssigned, func(ctx context.Context, event *models.Event) error {
+		log.WithField("event_id", event.ID).Info("Processing courier assignment event")
+		return nil
+	})
+
+	consumer.RegisterHandler(models.EventTypeCourierStatusChanged, func(ctx context.Context, event *models.Event) error {
+		log.WithField("event_id", event.ID).Info("Processing courier status changed event")
+		return nil
+	})
+
+	consumer.RegisterHandler(models.EventTypeLocationUpdated, func(ctx context.Context, event *models.Event) error {
+		log.WithField("event_id", event.ID).Info("Processing location update event")
 		return nil
 	})
 }

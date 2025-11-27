@@ -47,9 +47,11 @@ type RedisConfig struct {
 
 // KafkaConfig представляет конфигурацию Kafka
 type KafkaConfig struct {
-	Brokers []string `json:"brokers"`
-	GroupID string   `json:"group_id"`
-	Topics  Topics   `json:"topics"`
+	Brokers         []string `json:"brokers"`
+	GroupID         string   `json:"group_id"`
+	Topics          Topics   `json:"topics"`
+	ConsumerLag     int64    `json:"consumer_lag"`
+	MonitorInterval int      `json:"monitor_interval"`
 }
 
 // Topics представляет список топиков Kafka
@@ -109,6 +111,8 @@ func Load() *Config {
 				Couriers:  getEnv("KAFKA_TOPIC_COURIERS", "couriers"),
 				Locations: getEnv("KAFKA_TOPIC_LOCATIONS", "locations"),
 			},
+			ConsumerLag:     int64(getEnvAsInt("KAFKA_CONSUMER_LAG", 1000)),
+			MonitorInterval: getEnvAsInt("KAFKA_MONITOR_INTERVAL_MINUTES", 15),
 		},
 		Logger: LoggerConfig{
 			Level:  getEnv("LOG_LEVEL", "info"),
