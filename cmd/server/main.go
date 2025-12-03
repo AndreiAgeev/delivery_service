@@ -98,7 +98,7 @@ func main() {
 	orderHandler := handlers.NewOrderHandler(orderService, reviewService, producer, redisClient, log)
 	courierHandler := handlers.NewCourierHandler(courierService, reviewService, producer, redisClient, log)
 	healthHandler := handlers.NewHealthHandler(db, redisClient)
-	cacheHandler := handlers.NewCacheHandler(redisService, log)
+	cacheHandler := handlers.NewRedisMetricsHandler(redisService, log)
 	kafkaMetricsHandler := handlers.NewKafkaMetricsHandler(kafkeMetricsService, log)
 
 	// Регистрация обработчиков событий Kafka
@@ -151,7 +151,7 @@ func setupRoutes(
 	orderHandler *handlers.OrderHandler,
 	courierHandler *handlers.CourierHandler,
 	healthHandler *handlers.HealthHandler,
-	cacheHandler *handlers.CacheHandler,
+	cacheHandler *handlers.RedisMetricsHandler,
 	kafkaMetricsHandler *handlers.KafkaMetricsHandler,
 ) *http.ServeMux {
 	mux := http.NewServeMux()

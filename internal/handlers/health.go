@@ -36,7 +36,7 @@ var startTime = time.Now()
 // Health проверяет состояние всех компонентов системы
 func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -77,13 +77,13 @@ func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 		statusCode = http.StatusServiceUnavailable
 	}
 
-	writeJSONResponse(w, statusCode, response)
+	WriteJSONResponse(w, statusCode, response)
 }
 
 // Readiness проверяет готовность приложения к обработке запросов
 func (h *HealthHandler) Readiness(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -92,26 +92,26 @@ func (h *HealthHandler) Readiness(w http.ResponseWriter, r *http.Request) {
 
 	// Быстрая проверка основных компонентов
 	if err := h.db.Health(); err != nil {
-		writeErrorResponse(w, http.StatusServiceUnavailable, "Database not ready")
+		WriteErrorResponse(w, http.StatusServiceUnavailable, "Database not ready")
 		return
 	}
 
 	if err := h.redisClient.Health(ctx); err != nil {
-		writeErrorResponse(w, http.StatusServiceUnavailable, "Redis not ready")
+		WriteErrorResponse(w, http.StatusServiceUnavailable, "Redis not ready")
 		return
 	}
 
-	writeJSONResponse(w, http.StatusOK, map[string]string{"status": "ready"})
+	WriteJSONResponse(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 // Liveness проверяет, что приложение живо
 func (h *HealthHandler) Liveness(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	writeJSONResponse(w, http.StatusOK, map[string]string{
+	WriteJSONResponse(w, http.StatusOK, map[string]string{
 		"status": "alive",
 		"uptime": time.Since(startTime).String(),
 	})

@@ -18,15 +18,21 @@ import (
 
 // OrderHandler представляет обработчик заказов
 type OrderHandler struct {
-	orderService  *services.OrderService
-	reviewService *services.ReviewService
-	producer      *kafka.Producer
-	redisClient   RedisInterface
+	orderService  services.OrderServiceInterface
+	reviewService services.ReviewServiceInterface
+	producer      kafka.ProducerInterface
+	redisClient   redis.RedisClientInterface
 	log           *logger.Logger
 }
 
 // NewOrderHandler создает новый обработчик заказов
-func NewOrderHandler(orderService *services.OrderService, reviewService *services.ReviewService, producer *kafka.Producer, redisClient *redis.Client, log *logger.Logger) *OrderHandler {
+func NewOrderHandler(
+	orderService services.OrderServiceInterface,
+	reviewService services.ReviewServiceInterface,
+	producer kafka.ProducerInterface,
+	redisClient redis.RedisClientInterface,
+	log *logger.Logger,
+) *OrderHandler {
 	return &OrderHandler{
 		orderService:  orderService,
 		reviewService: reviewService,
@@ -39,19 +45,19 @@ func NewOrderHandler(orderService *services.OrderService, reviewService *service
 // CreateOrder создает новый заказ
 func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	var req models.CreateOrderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
+		WriteErrorResponse(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
 	// Валидация запроса
 	if err := h.validateCreateOrderRequest(&req); err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, err.Error())
+		WriteErrorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -59,7 +65,7 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	order, err := h.orderService.CreateOrder(&req)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to create order")
-		writeErrorResponse(w, http.StatusInternalServerError, "Failed to create order")
+		WriteErrorResponse(w, http.StatusInternalServerError, "Failed to create order")
 		return
 	}
 
@@ -77,29 +83,29 @@ func (h *OrderHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.log.WithField("order_id", order.ID).Info("Order created successfully")
-	writeJSONResponse(w, http.StatusCreated, order)
+	WriteJSONResponse(w, http.StatusCreated, order)
 }
 
 // GetOrder получает заказ по ID
 func (h *OrderHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	orderID, err := extractUUIDFromPath(r.URL.Path, apiOrderPrefix)
+	orderID, err := ExtractUUIDFromPath(r.URL.Path, apiOrderPrefix)
 	if err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, "Invalid order ID")
+		WriteErrorResponse(w, http.StatusBadRequest, "Invalid order ID")
 		return
 	}
 
 	// Попытка получить из кеша
 	cacheKey := redis.GenerateKey(redis.KeyPrefixOrder, orderID.String())
 	var order models.Order
-	if err := h.redisClient.Get(r.Context(), cacheKey, &order); err == nil {
+	if err = h.redisClient.Get(r.Context(), cacheKey, &order); err == nil {
 		h.redisClient.Hit()
 		h.log.WithField("order_id", orderID).Debug("Order retrieved from cache")
-		writeJSONResponse(w, http.StatusOK, &order)
+		WriteJSONResponse(w, http.StatusOK, &order)
 		return
 	}
 	h.redisClient.Miss()
@@ -108,10 +114,10 @@ func (h *OrderHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 	orderPtr, err := h.orderService.GetOrder(orderID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			writeErrorResponse(w, http.StatusNotFound, "Order not found")
+			WriteErrorResponse(w, http.StatusNotFound, "Order not found")
 		} else {
 			h.log.WithError(err).Error("Failed to get order")
-			writeErrorResponse(w, http.StatusInternalServerError, "Failed to get order")
+			WriteErrorResponse(w, http.StatusInternalServerError, "Failed to get order")
 		}
 		return
 	}
@@ -123,25 +129,25 @@ func (h *OrderHandler) GetOrder(w http.ResponseWriter, r *http.Request) {
 	}
 	h.redisClient.Hit()
 
-	writeJSONResponse(w, http.StatusOK, orderPtr)
+	WriteJSONResponse(w, http.StatusOK, orderPtr)
 }
 
 // UpdateOrderStatus обновляет статус заказа
 func (h *OrderHandler) UpdateOrderStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	orderID, err := extractUUIDFromPath(r.URL.Path, "/api/orders/")
+	orderID, err := ExtractUUIDFromPath(r.URL.Path, "/api/orders/")
 	if err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, "Invalid order ID")
+		WriteErrorResponse(w, http.StatusBadRequest, "Invalid order ID")
 		return
 	}
 
 	var req models.UpdateOrderStatusRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
+		WriteErrorResponse(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -149,9 +155,9 @@ func (h *OrderHandler) UpdateOrderStatus(w http.ResponseWriter, r *http.Request)
 	currentOrder, err := h.orderService.GetOrder(orderID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			writeErrorResponse(w, http.StatusNotFound, "Order not found")
+			WriteErrorResponse(w, http.StatusNotFound, "Order not found")
 		} else {
-			writeErrorResponse(w, http.StatusInternalServerError, "Failed to get order")
+			WriteErrorResponse(w, http.StatusInternalServerError, "Failed to get order")
 		}
 		return
 	}
@@ -161,10 +167,10 @@ func (h *OrderHandler) UpdateOrderStatus(w http.ResponseWriter, r *http.Request)
 	// Обновление статуса
 	if err := h.orderService.UpdateOrderStatus(orderID, &req); err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			writeErrorResponse(w, http.StatusNotFound, "Order not found")
+			WriteErrorResponse(w, http.StatusNotFound, "Order not found")
 		} else {
 			h.log.WithError(err).Error("Failed to update order status")
-			writeErrorResponse(w, http.StatusInternalServerError, "Failed to update order status")
+			WriteErrorResponse(w, http.StatusInternalServerError, "Failed to update order status")
 		}
 		return
 	}
@@ -181,13 +187,13 @@ func (h *OrderHandler) UpdateOrderStatus(w http.ResponseWriter, r *http.Request)
 	}
 
 	h.log.WithField("order_id", orderID).WithField("new_status", req.Status).Info("Order status updated")
-	writeJSONResponse(w, http.StatusOK, map[string]string{"message": "Order status updated successfully"})
+	WriteJSONResponse(w, http.StatusOK, map[string]string{"message": "Order status updated successfully"})
 }
 
 // GetOrders получает список заказов с фильтрацией
 func (h *OrderHandler) GetOrders(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -204,7 +210,7 @@ func (h *OrderHandler) GetOrders(w http.ResponseWriter, r *http.Request) {
 	if courierIDStr := query.Get("courier_id"); courierIDStr != "" {
 		id, err := uuid.Parse(courierIDStr)
 		if err != nil {
-			writeErrorResponse(w, http.StatusBadRequest, "Invalid courier ID")
+			WriteErrorResponse(w, http.StatusBadRequest, "Invalid courier ID")
 			return
 		}
 		courierID = &id
@@ -227,38 +233,38 @@ func (h *OrderHandler) GetOrders(w http.ResponseWriter, r *http.Request) {
 	orders, err := h.orderService.GetOrders(status, courierID, limit, offset)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to get orders")
-		writeErrorResponse(w, http.StatusInternalServerError, "Failed to get orders")
+		WriteErrorResponse(w, http.StatusInternalServerError, "Failed to get orders")
 		return
 	}
 
-	writeJSONResponse(w, http.StatusOK, orders)
+	WriteJSONResponse(w, http.StatusOK, orders)
 }
 
 // CreateReview создаёт отзыв
 func (h *OrderHandler) CreateReview(w http.ResponseWriter, r *http.Request) {
 	// Проверяем метода запроса
 	if r.Method != http.MethodPost {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	// Получаем объект запроса
 	var req models.CreateReviewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
+		WriteErrorResponse(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
 	// Валидируем полученные данные
 	if err := h.validateCreateReviewRequest(&req); err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, err.Error())
+		WriteErrorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// Получаем ID заказа
-	orderID, err := extractUUIDFromPath(r.URL.Path, apiOrderPrefix)
+	orderID, err := ExtractUUIDFromPath(r.URL.Path, apiOrderPrefix)
 	if err != nil {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusBadRequest, "Invalid order ID")
 		return
 	}
 
@@ -271,10 +277,10 @@ func (h *OrderHandler) CreateReview(w http.ResponseWriter, r *http.Request) {
 		orderPtr, err := h.orderService.GetOrder(orderID)
 		if err != nil {
 			if strings.Contains(err.Error(), "not found") {
-				writeErrorResponse(w, http.StatusNotFound, "Order not found")
+				WriteErrorResponse(w, http.StatusNotFound, "Order not found")
 			} else {
 				h.log.WithError(err).Error("Failed to get order")
-				writeErrorResponse(w, http.StatusInternalServerError, "Failed to get order")
+				WriteErrorResponse(w, http.StatusInternalServerError, "Failed to get order")
 			}
 			return
 		}
@@ -285,7 +291,8 @@ func (h *OrderHandler) CreateReview(w http.ResponseWriter, r *http.Request) {
 	review, err := h.reviewService.CreateReview(&req, order)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to create review")
-		writeErrorResponse(w, http.StatusInternalServerError, "Failed to create review")
+		WriteErrorResponse(w, http.StatusInternalServerError, "Failed to create review")
+		return
 	}
 
 	// Пересчитывает рейтинг курьера
@@ -306,7 +313,7 @@ func (h *OrderHandler) CreateReview(w http.ResponseWriter, r *http.Request) {
 		"rating":     review.Rating,
 		"text":       review.Text,
 	}).Info("Review created")
-	writeJSONResponse(w, http.StatusOK, review)
+	WriteJSONResponse(w, http.StatusCreated, review)
 }
 
 // validateCreateOrderRequest валидирует запрос на создание заказа
@@ -316,6 +323,9 @@ func (h *OrderHandler) validateCreateOrderRequest(req *models.CreateOrderRequest
 	}
 	if req.CustomerPhone == "" {
 		return fmt.Errorf("customer phone is required")
+	}
+	if req.PickupAddress == "" {
+		return fmt.Errorf("pickup address is required")
 	}
 	if req.DeliveryAddress == "" {
 		return fmt.Errorf("delivery address is required")

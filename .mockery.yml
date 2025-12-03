@@ -1,0 +1,29 @@
+all: false
+force-file-write: true
+formatter: goimports
+include-auto-generated: false
+log-level: info
+structname: '{{.Mock}}{{.InterfaceName}}'
+recursive: false
+require-template-schema-exists: true
+template: testify
+template-schema: '{{.Template}}.schema.json'
+packages:
+  delivery-system/internal/services:
+    config:
+      all: true
+      dir: '{{.InterfaceDir}}/services_mocks'
+      filename: services_mocks.go
+      pkgname: "services_mocks"
+  delivery-system/internal/redis:
+    config:
+      all: true
+      dir: '{{.InterfaceDir}}/redis_mocks'
+      filename: redis_mocks.go
+      pkgname: "redis_mocks"
+  delivery-system/internal/kafka:
+    config:
+      all: true
+      dir: '{{.InterfaceDir}}/kafka_mocks'
+      filename: kafka_mocks.go
+      pkgname: "kafka_mocks"

@@ -18,15 +18,21 @@ import (
 
 // CourierHandler представляет обработчик курьеров
 type CourierHandler struct {
-	courierService *services.CourierService
-	reviewService  *services.ReviewService
-	producer       *kafka.Producer
-	redisClient    RedisInterface
+	courierService services.CourierServiceInterface
+	reviewService  services.ReviewServiceInterface
+	producer       kafka.ProducerInterface
+	redisClient    redis.RedisClientInterface
 	log            *logger.Logger
 }
 
 // NewCourierHandler создает новый обработчик курьеров
-func NewCourierHandler(courierService *services.CourierService, reviewService *services.ReviewService, producer *kafka.Producer, redisClient *redis.Client, log *logger.Logger) *CourierHandler {
+func NewCourierHandler(
+	courierService services.CourierServiceInterface,
+	reviewService services.ReviewServiceInterface,
+	producer kafka.ProducerInterface,
+	redisClient redis.RedisClientInterface,
+	log *logger.Logger,
+) *CourierHandler {
 	return &CourierHandler{
 		courierService: courierService,
 		reviewService:  reviewService,
@@ -39,19 +45,19 @@ func NewCourierHandler(courierService *services.CourierService, reviewService *s
 // CreateCourier создает нового курьера
 func (h *CourierHandler) CreateCourier(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	var req models.CreateCourierRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
+		WriteErrorResponse(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
 	// Валидация запроса
 	if err := h.validateCreateCourierRequest(&req); err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, err.Error())
+		WriteErrorResponse(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -59,7 +65,7 @@ func (h *CourierHandler) CreateCourier(w http.ResponseWriter, r *http.Request) {
 	courier, err := h.courierService.CreateCourier(&req)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to create courier")
-		writeErrorResponse(w, http.StatusInternalServerError, "Failed to create courier")
+		WriteErrorResponse(w, http.StatusInternalServerError, "Failed to create courier")
 		return
 	}
 
@@ -70,19 +76,19 @@ func (h *CourierHandler) CreateCourier(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.log.WithField("courier_id", courier.ID).Info("Courier created successfully")
-	writeJSONResponse(w, http.StatusCreated, courier)
+	WriteJSONResponse(w, http.StatusCreated, courier)
 }
 
 // GetCourier получает курьера по ID
 func (h *CourierHandler) GetCourier(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	courierID, err := extractUUIDFromPath(r.URL.Path, "/api/couriers/")
+	courierID, err := ExtractUUIDFromPath(r.URL.Path, "/api/couriers/")
 	if err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, "Invalid courier ID")
+		WriteErrorResponse(w, http.StatusBadRequest, "Invalid courier ID")
 		return
 	}
 
@@ -92,7 +98,7 @@ func (h *CourierHandler) GetCourier(w http.ResponseWriter, r *http.Request) {
 	if err := h.redisClient.Get(r.Context(), cacheKey, &courier); err == nil {
 		h.redisClient.Hit()
 		h.log.WithField("courier_id", courierID).Debug("Courier retrieved from cache")
-		writeJSONResponse(w, http.StatusOK, &courier)
+		WriteJSONResponse(w, http.StatusOK, &courier)
 		return
 	}
 	h.redisClient.Miss()
@@ -101,10 +107,10 @@ func (h *CourierHandler) GetCourier(w http.ResponseWriter, r *http.Request) {
 	courierPtr, err := h.courierService.GetCourier(courierID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			writeErrorResponse(w, http.StatusNotFound, "Courier not found")
+			WriteErrorResponse(w, http.StatusNotFound, "Courier not found")
 		} else {
 			h.log.WithError(err).Error("Failed to get courier")
-			writeErrorResponse(w, http.StatusInternalServerError, "Failed to get courier")
+			WriteErrorResponse(w, http.StatusInternalServerError, "Failed to get courier")
 		}
 		return
 	}
@@ -116,25 +122,25 @@ func (h *CourierHandler) GetCourier(w http.ResponseWriter, r *http.Request) {
 	}
 	h.redisClient.Hit()
 
-	writeJSONResponse(w, http.StatusOK, courierPtr)
+	WriteJSONResponse(w, http.StatusOK, courierPtr)
 }
 
 // UpdateCourierStatus обновляет статус курьера
 func (h *CourierHandler) UpdateCourierStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	courierID, err := extractUUIDFromPath(r.URL.Path, "/api/couriers/")
+	courierID, err := ExtractUUIDFromPath(r.URL.Path, "/api/couriers/")
 	if err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, "Invalid courier ID")
+		WriteErrorResponse(w, http.StatusBadRequest, "Invalid courier ID")
 		return
 	}
 
 	var req models.UpdateCourierStatusRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
+		WriteErrorResponse(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
@@ -142,9 +148,9 @@ func (h *CourierHandler) UpdateCourierStatus(w http.ResponseWriter, r *http.Requ
 	currentCourier, err := h.courierService.GetCourier(courierID)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			writeErrorResponse(w, http.StatusNotFound, "Courier not found")
+			WriteErrorResponse(w, http.StatusNotFound, "Courier not found")
 		} else {
-			writeErrorResponse(w, http.StatusInternalServerError, "Failed to get courier")
+			WriteErrorResponse(w, http.StatusInternalServerError, "Failed to get courier")
 		}
 		return
 	}
@@ -154,10 +160,10 @@ func (h *CourierHandler) UpdateCourierStatus(w http.ResponseWriter, r *http.Requ
 	// Обновление статуса
 	if err := h.courierService.UpdateCourierStatus(courierID, &req); err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			writeErrorResponse(w, http.StatusNotFound, "Courier not found")
+			WriteErrorResponse(w, http.StatusNotFound, "Courier not found")
 		} else {
 			h.log.WithError(err).Error("Failed to update courier status")
-			writeErrorResponse(w, http.StatusInternalServerError, "Failed to update courier status")
+			WriteErrorResponse(w, http.StatusInternalServerError, "Failed to update courier status")
 		}
 		return
 	}
@@ -181,13 +187,13 @@ func (h *CourierHandler) UpdateCourierStatus(w http.ResponseWriter, r *http.Requ
 	}
 
 	h.log.WithField("courier_id", courierID).WithField("new_status", req.Status).Info("Courier status updated")
-	writeJSONResponse(w, http.StatusOK, map[string]string{"message": "Courier status updated successfully"})
+	WriteJSONResponse(w, http.StatusOK, map[string]string{"message": "Courier status updated successfully"})
 }
 
 // GetCouriers получает список курьеров с фильтрацией
 func (h *CourierHandler) GetCouriers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
@@ -224,40 +230,40 @@ func (h *CourierHandler) GetCouriers(w http.ResponseWriter, r *http.Request) {
 	couriers, err := h.courierService.GetCouriers(status, limit, offset, ratingSort)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to get couriers")
-		writeErrorResponse(w, http.StatusInternalServerError, "Failed to get couriers")
+		WriteErrorResponse(w, http.StatusInternalServerError, "Failed to get couriers")
 		return
 	}
 
-	writeJSONResponse(w, http.StatusOK, couriers)
+	WriteJSONResponse(w, http.StatusOK, couriers)
 }
 
 // GetAvailableCouriers получает список доступных курьеров
 func (h *CourierHandler) GetAvailableCouriers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
 	couriers, err := h.courierService.GetAvailableCouriers()
 	if err != nil {
 		h.log.WithError(err).Error("Failed to get available couriers")
-		writeErrorResponse(w, http.StatusInternalServerError, "Failed to get available couriers")
+		WriteErrorResponse(w, http.StatusInternalServerError, "Failed to get available couriers")
 		return
 	}
 
-	writeJSONResponse(w, http.StatusOK, couriers)
+	WriteJSONResponse(w, http.StatusOK, couriers)
 }
 
 // AssignOrderToCourier назначает заказ курьеру
 func (h *CourierHandler) AssignOrderToCourier(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
 
-	courierID, err := extractUUIDFromPath(r.URL.Path, "/api/couriers/")
+	courierID, err := ExtractUUIDFromPath(r.URL.Path, "/api/couriers/")
 	if err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, "Invalid courier ID")
+		WriteErrorResponse(w, http.StatusBadRequest, "Invalid courier ID")
 		return
 	}
 
@@ -265,24 +271,24 @@ func (h *CourierHandler) AssignOrderToCourier(w http.ResponseWriter, r *http.Req
 		OrderID uuid.UUID `json:"order_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, "Invalid request body")
+		WriteErrorResponse(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
 	if req.OrderID == uuid.Nil {
-		writeErrorResponse(w, http.StatusBadRequest, "Order ID is required")
+		WriteErrorResponse(w, http.StatusBadRequest, "Order ID is required")
 		return
 	}
 
 	// Назначение заказа курьеру
 	if err := h.courierService.AssignOrderToCourier(req.OrderID, courierID); err != nil {
 		if strings.Contains(err.Error(), "not found") {
-			writeErrorResponse(w, http.StatusNotFound, err.Error())
+			WriteErrorResponse(w, http.StatusNotFound, err.Error())
 		} else if strings.Contains(err.Error(), "not available") {
-			writeErrorResponse(w, http.StatusBadRequest, err.Error())
+			WriteErrorResponse(w, http.StatusBadRequest, err.Error())
 		} else {
 			h.log.WithError(err).Error("Failed to assign order to courier")
-			writeErrorResponse(w, http.StatusInternalServerError, "Failed to assign order to courier")
+			WriteErrorResponse(w, http.StatusInternalServerError, "Failed to assign order to courier")
 		}
 		return
 	}
@@ -305,20 +311,20 @@ func (h *CourierHandler) AssignOrderToCourier(w http.ResponseWriter, r *http.Req
 	}
 
 	h.log.WithField("order_id", req.OrderID).WithField("courier_id", courierID).Info("Order assigned to courier")
-	writeJSONResponse(w, http.StatusOK, map[string]string{"message": "Order assigned to courier successfully"})
+	WriteJSONResponse(w, http.StatusOK, map[string]string{"message": "Order assigned to courier successfully"})
 }
 
 // GetCourierReviews возвращает список отзывов на курьера
 func (h *CourierHandler) GetCourierReviews(w http.ResponseWriter, r *http.Request) {
 	// Проверяем метод
 	if r.Method != http.MethodGet {
-		writeErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
+		WriteErrorResponse(w, http.StatusMethodNotAllowed, "Method not allowed")
 	}
 
 	// Получаем id курьера
-	courierID, err := extractUUIDFromPath(r.URL.Path, apiCourierPrefix)
+	courierID, err := ExtractUUIDFromPath(r.URL.Path, apiCourierPrefix)
 	if err != nil {
-		writeErrorResponse(w, http.StatusBadRequest, "Invalid courier ID")
+		WriteErrorResponse(w, http.StatusBadRequest, "Invalid courier ID")
 		return
 	}
 
@@ -326,12 +332,12 @@ func (h *CourierHandler) GetCourierReviews(w http.ResponseWriter, r *http.Reques
 	reviews, err := h.reviewService.GetReviews(courierID)
 	if err != nil {
 		h.log.WithError(err).Error("Failed to get reviews")
-		writeErrorResponse(w, http.StatusInternalServerError, "Failed to get reviews")
+		WriteErrorResponse(w, http.StatusInternalServerError, "Failed to get reviews")
 		return
 	}
 
 	h.log.Info("Successfully retrieved courier reviews")
-	writeJSONResponse(w, http.StatusOK, reviews)
+	WriteJSONResponse(w, http.StatusOK, reviews)
 }
 
 // validateCreateCourierRequest валидирует запрос на создание курьера
