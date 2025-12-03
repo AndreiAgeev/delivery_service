@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,8 +14,6 @@ import (
 	"delivery-system/internal/logger"
 	"delivery-system/internal/models"
 	"delivery-system/internal/redis"
-
-	"golang.org/x/net/context"
 )
 
 const defaultCacheTTL = 15 * time.Minute
@@ -145,7 +144,7 @@ func (g *GeolocationService) MakeRoute(coordinates [][2]float64) (float64, error
 	return dist, nil
 }
 
-func (g *GeolocationService) cacheResults(coordinates [][2]float64, distance float64, order *models.Order) {
+func (g *GeolocationService) CacheResults(coordinates [][2]float64, distance float64, order *models.Order) {
 	orderGeolocation := models.GeoCache{
 		PickupCoordinates:   coordinates[0],
 		DeliveryCoordinates: coordinates[1],

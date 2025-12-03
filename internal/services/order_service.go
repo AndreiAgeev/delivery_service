@@ -17,12 +17,12 @@ import (
 type OrderService struct {
 	db       *database.DB
 	log      *logger.Logger
-	geo      *GeolocationService
+	geo      GeolocationServiceInterface
 	business *config.BusinessConfig
 }
 
 // NewOrderService создает новый экземпляр сервиса заказов
-func NewOrderService(db *database.DB, log *logger.Logger, geo *GeolocationService, cfg *config.BusinessConfig) *OrderService {
+func NewOrderService(db *database.DB, log *logger.Logger, geo GeolocationServiceInterface, cfg *config.BusinessConfig) *OrderService {
 	return &OrderService{
 		db:       db,
 		log:      log,
@@ -123,7 +123,7 @@ func (s *OrderService) CreateOrder(req *models.CreateOrderRequest) (*models.Orde
 	}
 
 	// Кешируем геоданные заказа
-	s.geo.cacheResults(coordinates, distance, order)
+	s.geo.CacheResults(coordinates, distance, order)
 
 	s.log.WithFields(map[string]interface{}{
 		"order_id":      order.ID,

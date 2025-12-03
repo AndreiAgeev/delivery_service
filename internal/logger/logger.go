@@ -50,6 +50,12 @@ func New(cfg *config.LoggerConfig) *Logger {
 	return &Logger{Logger: log}
 }
 
+func NewTest() *Logger {
+	log := logrus.New()
+	log.SetOutput(io.Discard)
+	return &Logger{Logger: log}
+}
+
 // WithField добавляет поле к логгеру
 func (l *Logger) WithField(key string, value interface{}) *logrus.Entry {
 	return l.Logger.WithField(key, value)

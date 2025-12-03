@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,23 +17,14 @@ const (
 	apiCourierPrefix string = "/api/couriers/"
 )
 
-// RedisInterface - интерфейс, реализующий часть методов redis.Client, необходимых для хендлеров
-type RedisInterface interface {
-	Set(ctx context.Context, key string, value interface{}, expiration time.Duration) error
-	Get(ctx context.Context, key string, dest interface{}) error
-	Delete(ctx context.Context, key string) error
-	Hit()
-	Miss()
-}
-
 // ErrorResponse представляет структуру ответа с ошибкой
 type ErrorResponse struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
 }
 
-// writeJSONResponse отправляет JSON ответ
-func writeJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) {
+// WriteJSONResponse отправляет JSON ответ
+func WriteJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 
@@ -43,17 +33,17 @@ func writeJSONResponse(w http.ResponseWriter, statusCode int, data interface{}) 
 	}
 }
 
-// writeErrorResponse отправляет ответ с ошибкой
-func writeErrorResponse(w http.ResponseWriter, statusCode int, message string) {
+// WriteErrorResponse отправляет ответ с ошибкой
+func WriteErrorResponse(w http.ResponseWriter, statusCode int, message string) {
 	response := ErrorResponse{
 		Error:   http.StatusText(statusCode),
 		Message: message,
 	}
-	writeJSONResponse(w, statusCode, response)
+	WriteJSONResponse(w, statusCode, response)
 }
 
-// extractUUIDFromPath извлекает UUID из пути URL
-func extractUUIDFromPath(path, prefix string) (uuid.UUID, error) {
+// ExtractUUIDFromPath извлекает UUID из пути URL
+func ExtractUUIDFromPath(path, prefix string) (uuid.UUID, error) {
 	if !strings.HasPrefix(path, prefix) {
 		return uuid.Nil, fmt.Errorf("invalid path format")
 	}
